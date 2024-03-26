@@ -370,8 +370,11 @@ struct Quadric {
         ret.point = ray.at(ret.t);
         ret.material = material;
 
-        Point3 center{-g, -h, -j};
-        Vector3 outward_normal = normalize(ret.point - center);
+        Vector3 outward_normal = normalize({
+            2.0f * (a * ret.point.x + d * ret.point.y + f * ret.point.z + g),
+            2.0f * (b * ret.point.y + d * ret.point.x + e * ret.point.z + h),
+            2.0f * (c * ret.point.z + e * ret.point.y + f * ret.point.x + j)
+        });
         ret.set_normal(ray, outward_normal);
 
         return ret;
@@ -581,7 +584,7 @@ static Color3 phong_shade(Ray ray, Intersection info) {
     Vector3 view_dir = normalize(ray.origin - info.point);
 
     Color3 closest_color = info.material.albedo.get_value(info.u, info.v, info.point);
-    Color3 I = {};
+    Color3 I{};
 
     for (const auto &light : lights) {
         Vector3 light_dir = normalize(light.centroid - info.point);

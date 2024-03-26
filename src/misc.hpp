@@ -483,7 +483,7 @@ static Color3 shade(Ray ray, size_t depth) {
             Vector3 light_dir = scene::lights[0].centroid - info.point;
 
             new_ray.origin = info.point;
-            new_ray.direction = 2 * info.normal * dot(info.normal, -light_dir) + light_dir;
+            new_ray.direction = reflect(-light_dir, info.normal);
             */
         } else {
             bool total_reflection = false;
