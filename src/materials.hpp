@@ -269,7 +269,7 @@ static const Material steel   {Texture::make(color::light_gray),           false
 static const Material mirror  {Texture::make(color::light_gray),           false, 0.1f, 0.3f, 0.6f, 0.0f, 3.0f, 0.0f};
 static const Material gold    {Texture::make(color::amber),                false, 0.1f, 0.6f, 0.6f, 0.0f, 3.0f, 0.0f};
 
-static const Material glass   {Texture::make(color::white),                false, 0.1f, 0.0f, 0.3f, 0.9f, 3.0f, 1.5f};
+static const Material glass   {Texture::make(color::white),                false, 0.1f, 0.0f, 0.0f, 0.9f, 3.0f, 1.5f};
 
 static const Material chess   {Texture::make(color::black, color::white),  false, 0.1f, 0.6f, 0.3f, 0.0f, 3.0f, 0.0f};
 

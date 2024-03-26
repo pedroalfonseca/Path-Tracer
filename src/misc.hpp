@@ -291,33 +291,135 @@ static void parse_obj(const char *filepath, Material material) {
     }
 
     if (material.emissive) {
-        scene::lights.push(Mesh::make(verts, idxs, material));
+        // TODO(paalf): remove the hardcoded 1.0f intensity
+        scene::lights.push(Light::make(verts, idxs, material, 1.0f));
     } else {
         scene::meshes.push(Mesh::make(verts, idxs, material));
     }
 }
 
 struct Token {
-    enum class Type {
+    enum class Type : byte {
+        EYE,
         ORTHO,
         SIZE,
+        BACKGROUND,
         AMBIENT,
         LIGHT,
         NPATHS,
         TONEMAPPING,
         SEED,
         OBJECTQUADRIC,
-        OBJECT
+        OBJECT,
+        UNKNOWN
     };
 
     Type type;
     const char *lexeme;
 };
 
+static Token get_next_token(const char *&at) {
+    at = skip_whitespace(at);
+
+    if (!(*at)) {
+        return {Token::Type::UNKNOWN, nullptr};
+    }
+
+    const char *start = at;
+    at = skip_whitespace(at);
+
+    size_t length = at - start;
+
+    if (strncmp(start, "eye", length) == 0) {
+        return {Token::Type::EYE, start};
+    } else if (strncmp(start, "ortho", length) == 0) {
+        return {Token::Type::ORTHO, start};
+    } else if (strncmp(start, "size", length) == 0) {
+        return {Token::Type::SIZE, start};
+    } else if (strncmp(start, "background", length) == 0) {
+        return {Token::Type::BACKGROUND, start};
+    } else if (strncmp(start, "ambient", length) == 0) {
+        return {Token::Type::AMBIENT, start};
+    } else if (strncmp(start, "light", length) == 0) {
+        return {Token::Type::LIGHT, start};
+    } else if (strncmp(start, "npaths", length) == 0) {
+        return {Token::Type::NPATHS, start};
+    } else if (strncmp(start, "tonemapping", length) == 0) {
+        return {Token::Type::TONEMAPPING, start};
+    } else if (strncmp(start, "seed", length) == 0) {
+        return {Token::Type::SEED, start};
+    } else if (strncmp(start, "objectquadric", length) == 0) {
+        return {Token::Type::OBJECTQUADRIC, start};
+    } else if (strncmp(start, "object", length) == 0) {
+        return {Token::Type::OBJECT, start};
+    }
+
+    return {Token::Type::UNKNOWN, start};
+}
+
+static const char *parse_vector3(const char *at, Vector3 &vec) {
+    at = parse_float(at, vec.x);
+    at = parse_float(at, vec.y);
+    at = parse_float(at, vec.z);
+
+    return skip_whitespace(at);
+}
+
 static void parse_sdl(const char *filepath) {
     const char *at = get_file_content(filepath);
 
     while (*at) {
+        Token token = get_next_token(at);
+
+        switch (token.type) {
+        case Token::Type::EYE: {
+            parse_vector3(at, camera::position);
+        } break;
+
+        case Token::Type::ORTHO: {
+
+        } break;
+
+        case Token::Type::SIZE: {
+            
+        } break;
+
+        case Token::Type::BACKGROUND: {
+
+        } break;
+
+        case Token::Type::AMBIENT: {
+
+        } break;
+
+        case Token::Type::LIGHT: {
+
+        } break;
+
+        case Token::Type::NPATHS: {
+
+        } break;
+
+        case Token::Type::TONEMAPPING: {
+
+        } break;
+
+        case Token::Type::SEED: {
+
+        } break;
+
+        case Token::Type::OBJECTQUADRIC: {
+
+        } break;
+
+        case Token::Type::OBJECT: {
+
+        } break;
+
+        case Token::Type::UNKNOWN: {
+
+        } break;
+        }
     }
 }
 } // namespace parser
@@ -345,34 +447,19 @@ struct Pixel {
 
 static constexpr size_t samples_per_pixel = 100, max_depth = 10;
 
-static bool intersect_shadow(Ray ray) {
-    Intersection info = scene::closest_intersection(ray, EPSILON32, INFINITY32);
-    if (info.material.emissive) {
-        return false;
-    }
-
-    if (info.intersected) {
-        return true;
-    }
-
-    return false;
-}
-
 static Color3 shade(Ray ray, size_t depth) {
+    if (depth == max_depth) {
+        return {};
+    }
+
     Intersection info = scene::closest_intersection(ray, EPSILON32, INFINITY32);
 
     if (info.intersected) {
-        Color3 color{};
-
         if (info.material.emissive) {
             return info.material.albedo.get_value(info.u, info.v, info.point);
         }
 
-        color += scene::phong_shade(ray, info);
-
-        if (depth == max_depth) {
-            return color;
-        }
+        Color3 color = scene::phong_shade(ray, info);
 
         float kd = info.material.kd, ks = info.material.ks, kt = info.material.kt;
         float ktot = kd + ks + kt;
@@ -380,30 +467,24 @@ static Color3 shade(Ray ray, size_t depth) {
 
         Ray new_ray;
         if (rand_val < kd) {
-            /*
-            float r1 = randf(0.0f, 1.0f), r2 = 2 * PI32 * randf(0.0f, 1.0f);
-            float sqrt_r1 = sqrtf(r1);
-
-            Vector3 v1{0.0f, 1.0f, 0.0f}, v2{1.0f, 0.0f, 0.0f};
-
-            Vector3 w = info.normal;
-            Vector3 u = absf(w.x) > 0.1f ? v1 : v2;
-            u = normalize(cross(u, w));
-            Vector3 v = cross(w, u);
-
-            Vector3 psi{
-                u.x * cosf(r2) * sqrt_r1 + v.x * sinf(r2) * sqrt_r1 + w.x * sqrt(1.0f - r1),
-                u.y * cosf(r2) * sqrt_r1 + v.y * sinf(r2) * sqrt_r1 + w.y * sqrt(1.0f - r1),
-                u.z * cosf(r2) * sqrt_r1 + v.z * sinf(r2) * sqrt_r1 + w.z * sqrt(1.0f - r1)
-            };
-
-            psi = normalize(psi);
-            */
+            float r1 = randf(0.0f, 1.0f), r2 = randf(0.0f, 1.0f);
+            float phi = acosf(sqrtf(r1)), theta = 2 * PI32 * r2;
 
             new_ray.origin = info.point;
-            new_ray.direction = randv3_in_hemisphere(info.normal);
+            new_ray.direction = {
+                sinf(phi) * cosf(theta),
+                sinf(phi) * sinf(theta),
+                cosf(phi)
+            };
         } else if (rand_val < kd + ks) {
             new_ray = reflect(ray, info.point, info.normal);
+
+            /*
+            Vector3 light_dir = scene::lights[0].centroid - info.point;
+
+            new_ray.origin = info.point;
+            new_ray.direction = 2 * info.normal * dot(info.normal, -light_dir) + light_dir;
+            */
         } else {
             bool total_reflection = false;
 
@@ -413,77 +494,11 @@ static Color3 shade(Ray ray, size_t depth) {
 
         float k = fmaxf(fmaxf(kd, ks), kt);
 
-        return color + shade(new_ray, depth + 1) * k;
+        return (color + shade(new_ray, depth + 1)) * k;
     }
 
     return scene::background_color;
 }
-
-/*
-static Color3 shade(Ray ray, size_t depth) {
-    if (depth >= max_depth) {
-        return {};
-    }
-
-    Intersection info = scene::closest_intersection(ray, EPSILON32, INFINITY32);
-    if (!info.intersected) {
-        return scene::background_color;
-    } else if (info.material.emissive) {
-        return info.material.albedo.get_value(info.u, info.v, info.point);
-    }
-
-    Color3 ret{};
-
-    constexpr float bias = 1e-4;
-
-    Color3 closest_color = info.material.albedo.get_value(info.u, info.v, info.point);
-    float ka = info.material.ka, kd = info.material.kd, ks = info.material.ks, kt = info.material.kt;
-
-    Vector3 view_dir = normalize(ray.origin - info.point);
-
-    for (const auto &light : scene::lights) {
-        Vector3 light_dir = light.centroid - info.point;
-        Color3 light_color = light.material.albedo.get_value(info.u, info.v, info.point);
-        Ray light_ray{info.point + info.normal * bias, light_dir};
-
-        Vector3 reflected_dir = normalize(reflect(-light_dir, info.normal));
-
-        Color3 ambient_color = closest_color * ka * fmaxf(scene::ambient_factor, 0.0f);
-
-        float diffuse_factor = dot(light_dir, info.normal);
-        Color3 tmp = hadamard(light_color, closest_color);
-        Color3 diffuse_color = tmp * kd * fmaxf(diffuse_factor, 0.0f);
-
-        float specular_factor = powf(dot(reflected_dir, view_dir), info.material.n);
-        Color3 specular_color = light_color * ks * fmaxf(specular_factor, 0.0f);
-
-        Color3 local_color{};
-        if (!intersect_shadow(light_ray)) {
-            local_color = ambient_color + diffuse_color + specular_color;
-        }
-
-        Ray new_ray{info.point};
-
-        float ktot = kd + ks + kt;
-        float rand_val = randf() * ktot;
-
-        if (rand_val < kd) {
-            new_ray.direction = randv3_in_hemisphere(info.normal);
-        } else if (rand_val < kd + ks) {
-            new_ray.direction = reflected_dir;
-        } else {
-            // refraction stuff
-        }
-
-        Color3 recursion_color = shade(new_ray, depth + 1);
-        float factor = fmaxf(fmaxf(kd, kd), kt);
-
-        ret = ret + (local_color + recursion_color) * factor;
-    }
-
-    return ret;
-}
-*/
 
 static void render() {
     size_t img_res = img_width * img_height;

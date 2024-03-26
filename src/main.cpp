@@ -166,7 +166,7 @@ int main(int argc, char *argv[]) {
         quad_verts.push({213.0f, 554.0f, 227.0f});
         quad_verts.push({343.0f, 554.0f, 227.0f});
 
-        scene::lights.push(Mesh::make(quad_verts, quad_idxs, material::glowing));
+        scene::lights.push(Light::make(quad_verts, quad_idxs, material::glowing, 1.0f));
 
         auto tetrahedron_verts = Array<Point3>::make(4);
         defer { tetrahedron_verts.destroy(); };
@@ -203,11 +203,12 @@ int main(int argc, char *argv[]) {
 
         scene::planes.push(Plane::make({0.0f, -0.5f, 0.0f}, {0.0f, -0.5f, 0.0f}, material::chess));
 
-        scene::spheres.push(Sphere::make({ 0.0f, 1.5f,  1.5f},  1.0f, material::glowing));
         scene::spheres.push(Sphere::make({ 0.0f, 0.0f, -1.0f},  0.5f, material::aqua));
         scene::spheres.push(Sphere::make({ 1.0f, 0.0f, -1.0f},  0.5f, material::mirror));
         scene::spheres.push(Sphere::make({-1.0f, 0.0f, -1.0f},  0.5f, material::glass));
         scene::spheres.push(Sphere::make({-1.0f, 0.0f, -1.0f}, -0.4f, material::glass));
+
+        scene::lights.push(Light::make({0.0f, 1.5f,  1.5f},  1.0f, material::glowing, 1.0f));
     } break;
 
     //case 'f': { parser::parse_sdl(argv[1]); } break;
@@ -232,6 +233,15 @@ int main(int argc, char *argv[]) {
         parser::parse_obj("res/models/luzcornell.obj", material::glowing);
         parser::parse_obj("res/models/cube1.obj", material::chalk);
         parser::parse_obj("res/models/cube2.obj", material::chalk);
+
+        /*
+        auto glass_ball = Quadric::make(
+            1.0f, 1.0f, 1.0f,  0.0f,  0.0f,
+            0.0f, -1.0f, 1.0f, 22.0f, 484.0f,
+            material::glass
+        );
+        scene::quadrics.push(glass_ball);
+        */
     } break;
 
     default: return 1;

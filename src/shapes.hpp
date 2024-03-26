@@ -292,6 +292,90 @@ struct Quadric {
     float f, g, h, j, k;
 
     Material material;
+
+    static Quadric make(float a, float b, float c, float d, float e,
+                        float f, float g, float h, float j, float k,
+                        Material material) {
+        return {
+            a, b, c, d, e,
+            f, g, h, j, k,
+            material
+        };
+    }
+
+    Intersection intersect(Ray ray, float t_min, float t_max) const {
+        Intersection ret{};
+
+        Point3 orig = ray.origin;
+        Vector3 dir = ray.direction;
+
+        float acoef = a * dir.x * dir.x +
+                      b * dir.y * dir.y +
+                      c * dir.z * dir.z +
+                      2.0f * d * dir.x * dir.y + 
+                      2.0f * e * dir.y * dir.z +
+                      2.0f * f * dir.x * dir.z;
+
+        float bcoef = 2.0f * (a * orig.x * dir.x +
+                              b * orig.y * dir.y +
+                              c * orig.z * dir.z +
+                              d * orig.x * dir.y +
+                              d * orig.y * dir.x +
+                              e * orig.y * dir.z +
+                              e * orig.z * dir.y +
+                              f * orig.x * dir.z +
+                              f * orig.z * dir.x +
+                              g * dir.x +
+                              h * dir.y +
+                              j * dir.z);
+
+        float ccoef = a * orig.x * orig.x +
+                      b * orig.y * orig.y +
+                      c * orig.z * orig.z +
+                      2.0f * d * orig.x * orig.y +
+                      2.0f * e * orig.y * orig.z +
+                      2.0f * f * orig.x * orig.z +
+                      2.0f * g * orig.x +
+                      2.0f * h * orig.y +
+                      2.0f * j * orig.z +
+                      k;
+
+        float t;
+        if (absf(acoef) < EPSILON32) {
+            if (bcoef < EPSILON32) {
+                return ret;
+            }
+
+            t = -ccoef / bcoef;
+        } else {
+            float delta = bcoef * bcoef - 4 * acoef * ccoef;
+            if (delta < 0.0f) {
+                return ret;
+            }
+
+            float sqrt_delta = sqrtf(delta);
+
+            t = (-bcoef - sqrt_delta) / (2 * acoef);
+            if (t < t_min || t > t_max) {
+                t = (-bcoef + sqrt_delta) / (2 * acoef);
+
+                if (t < t_min || t > t_max) {
+                    return ret;
+                }
+            }
+        }
+
+        ret.intersected = true;
+        ret.t = t;
+        ret.point = ray.at(ret.t);
+        ret.material = material;
+
+        Point3 center{-g, -h, -j};
+        Vector3 outward_normal = normalize(ret.point - center);
+        ret.set_normal(ray, outward_normal);
+
+        return ret;
+    }
 };
 
 // --------------------------------------------------------------------------------
@@ -354,13 +438,66 @@ struct Sphere {
 
 // --------------------------------------------------------------------------------
 
+struct Light {
+    enum class Type : byte {
+        MESH,
+        SPHERE
+    };
+
+    Type type;
+
+    union {
+        Mesh   mesh;
+        Sphere sphere;
+    };
+
+    Point3 centroid;
+    float intensity;
+
+    static Light make(Array<Point3> verts, Array<size_t> idxs, Material material, float intensity) {
+        Light ret{Type::MESH};
+        ret.mesh = Mesh::make(verts, idxs, material);
+        ret.centroid = ret.mesh.centroid;
+        ret.intensity = intensity;
+
+        return ret;
+    }
+
+    static Light make(Point3 center, float radius, Material material, float intensity) {
+        Light ret{Type::SPHERE};
+        ret.sphere = Sphere::make(center, radius, material);
+        ret.centroid = ret.sphere.center;
+        ret.intensity = intensity;
+
+        return ret;
+    }
+
+    Intersection intersect(Ray ray, float t_min, float t_max) const {
+        switch (type) {
+        case Type::MESH:   return mesh.intersect(ray, t_min, t_max);
+        case Type::SPHERE: return sphere.intersect(ray, t_min, t_max);
+        default:           return {};
+        }
+    }
+
+    Material get_material() const {
+        switch (type) {
+        case Type::MESH:   return mesh.material;
+        case Type::SPHERE: return sphere.material;
+        default:           return {};
+        }
+    }
+};
+
+// --------------------------------------------------------------------------------
+
 namespace scene {
 static Array<Plane>   planes{};
 static Array<Mesh>    meshes{};
 static Array<Quadric> quadrics{};
 static Array<Sphere>  spheres{};
 
-static Array<Mesh>    lights{};
+static Array<Light>   lights{};
 
 static Color3 background_color;
 
@@ -399,6 +536,15 @@ static Intersection closest_intersection(Ray ray, float t_min, float t_max) {
         }
     }
 
+    for (const auto &quadric : quadrics) {
+        cur_info = quadric.intersect(ray, t_min, t_closest);
+
+        if (cur_info.intersected) {
+            t_closest = cur_info.t;
+            ret = cur_info;
+        }
+    }
+
     for (const auto &sphere : spheres) {
         cur_info = sphere.intersect(ray, t_min, t_closest);
 
@@ -420,60 +566,65 @@ static Intersection closest_intersection(Ray ray, float t_min, float t_max) {
     return ret;
 }
 
-static float get_k_shadow(Ray ray) {
-    Intersection info{};
-
-    for (const auto &plane : planes) {
-        info = plane.intersect(ray, EPSILON32, INFINITY32);
-
-        if (info.intersected) {
-            return info.material.kt;
-        }
+static bool shoot_shadow_ray(Ray ray) {
+    Intersection info = scene::closest_intersection(ray, EPSILON32, INFINITY32);
+    if (info.material.emissive) {
+        return false;
+    } else if (info.intersected) {
+        return true;
     }
 
-    for (const auto &mesh : meshes) {
-        info = mesh.intersect(ray, EPSILON32, INFINITY32);
-
-        if (info.intersected) {
-            return info.material.kt;
-        }
-    }
-
-    for (const auto &sphere : spheres) {
-        info = sphere.intersect(ray, EPSILON32, INFINITY32);
-
-        if (info.intersected) {
-            return info.material.kt;
-        }
-    }
-
-    for (const auto &light : lights) {
-        info = light.intersect(ray, EPSILON32, INFINITY32);
-
-        if (info.intersected) {
-            return 0.0f;
-        }
-    }
-
-    return 0.0f;
+    return false;
 }
 
 static Color3 phong_shade(Ray ray, Intersection info) {
     Vector3 view_dir = normalize(ray.origin - info.point);
 
     Color3 closest_color = info.material.albedo.get_value(info.u, info.v, info.point);
-    Color3 I = closest_color * info.material.ka * fmaxf(scene::ambient_factor, 0.0f);
-
-    constexpr float light_intensity = 1.0f;
+    Color3 I = {};
 
     for (const auto &light : lights) {
         Vector3 light_dir = normalize(light.centroid - info.point);
-        Color3 light_color = light_intensity * light.material.albedo.get_value(info.u, info.v, info.point);
-        Ray light_ray{info.point + info.normal * BIAS, light_dir};
 
-        float k_shadow = get_k_shadow(light_ray);
+#define BARYCENTRIC
+#ifdef BARYCENTRIC
+        size_t face_idx = rand() % 2;
+        Triangle face = light.mesh.triangles[face_idx];
+
+        float alpha = rand() % 100;
+        float beta = rand() % 100;
+        float gamma = rand() % 100;
+
+        float sum = alpha + beta + gamma;
+
+        alpha /= sum;
+        beta /= sum;
+        gamma /= sum;
+
+        Point3 v0 = face.v0;
+        Point3 v1 = face.v1;
+        Point3 v2 = face.v2;
+
+        Point3 light_rand{
+            alpha * v0.x + beta * v1.x + gamma * v2.x,
+            v0.y,
+            alpha * v0.z + beta * v1.z + gamma * v2.z
+        };
+
+        Vector3 rand_dir = normalize(light_rand - info.point);
+#else
+        //Vector3 rand_dir = randv3_in_hemisphere(light_dir);
+        Vector3 rand_dir = light_dir;
+#endif
+
+        Color3 light_color = light.intensity * light.get_material().albedo.get_value(info.u, info.v, info.point);
+        Ray light_ray{info.point + info.normal * BIAS, rand_dir};
+
+        bool is_shadow = shoot_shadow_ray(light_ray);
 
         Vector3 reflected_dir = normalize(reflect(-light_dir, info.normal));
+
+        Color3 ambient_color = closest_color * info.material.ka * fmaxf(scene::ambient_factor, 0.0f);
 
         float diffuse_factor = dot(light_dir, info.normal);
         Color3 tmp = hadamard(light_color, closest_color);
@@ -482,7 +633,9 @@ static Color3 phong_shade(Ray ray, Intersection info) {
         float specular_factor = powf(dot(reflected_dir, view_dir), info.material.n);
         Color3 specular_color = light_color * info.material.ks * fmaxf(specular_factor, 0.0f);
 
-        I += (diffuse_color + specular_color) * k_shadow;
+        if (!is_shadow) {
+            I += ambient_color + diffuse_color + specular_color;
+        }
     }
 
     return I;
