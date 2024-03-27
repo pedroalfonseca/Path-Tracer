@@ -7,9 +7,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    timespec begin;
-    timespec_get(&begin, TIME_UTC);
-
     Point3 look_from, look_at;
 
     defer { scene::destroy(), material::earth.albedo.destroy(); };
@@ -211,41 +208,26 @@ int main(int argc, char *argv[]) {
         scene::lights.push(Light::make({0.0f, 1.5f,  1.5f},  1.0f, material::glowing, 1.0f));
     } break;
 
-    //case 'f': { parser::parse_sdl(argv[1]); } break;
-
-    // TMP
     case 'f': {
-        renderer::set_resolution(200, 200);
-
-        look_from = {0.0f, 0.0f,  5.7f};
-        look_at   = {0.0f, 0.0f, -1.0f};
-
+        look_at = {0.0f, 0.0f, -1.0f};
+        parser::parse_sdl(argv[1], look_from);
         camera::init(look_from, look_at, {0.0f, 1.0f, 0.0f}, 20.0f, renderer::aspect_ratio);
 
-        scene::background_color = color::black;
-        scene::ambient_factor = 0.5f;
-
-        parser::parse_obj("res/models/leftwall.obj", material::girly);
-        parser::parse_obj("res/models/rightwall.obj", material::jeans);
-        parser::parse_obj("res/models/floor.obj", material::chalk);
-        parser::parse_obj("res/models/back.obj", material::chalk);
-        parser::parse_obj("res/models/ceiling.obj", material::chalk);
-        parser::parse_obj("res/models/luzcornell.obj", material::glowing);
-        parser::parse_obj("res/models/cube1.obj", material::chalk);
-        parser::parse_obj("res/models/cube2.obj", material::chalk);
-
         /*
-        auto glass_ball = Quadric::make(
-            1.0f, 1.0f, 1.0f,  0.0f,  0.0f,
-            0.0f, -1.0f, 1.0f, 22.0f, 484.0f,
-            material::glass
-        );
-        scene::quadrics.push(glass_ball);
+        Point3 min{-3.0f, -3.0f, -21.0f}, max{3.0f, 3.0f, 27.0f};
+        scene::quadrics.push(Quadric::make(
+        //   a      b     c     d     e     f     g     h      j       k
+            1.0f, -1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -0.5f, -24.0f,
+            material::rubber, min, max
+        ));
         */
     } break;
 
     default: return 1;
     }
+
+    timespec begin;
+    timespec_get(&begin, TIME_UTC);
 
     renderer::render();
 

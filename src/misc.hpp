@@ -14,6 +14,10 @@ static Vector3 up;
 
 static float width, height;
 
+static float win_x0, win_y0;
+static float win_x1, win_y1;
+static float win_width, win_height;
+
 static void init(Point3 look_from, Point3 look_at, Vector3 world_up, float vfov, float aspect_ratio) {
     float theta = radians(vfov);
     float height = tanf(theta / 2.0f);
@@ -35,6 +39,20 @@ static void init(Point3 look_from, Point3 look_at, Vector3 world_up, float vfov,
 
 static Ray get_ray(float x, float y) {
     return {position, lower_left + (x * horizontal) + (y * vertical) - position};
+    /*
+    Ray ret;
+    ret.origin = position;
+
+    float xw = win_x0 + (x * win_width);
+    float yw = win_y0 + (y * win_height);
+    float zw = 0.0f;
+
+    ret.direction.x = xw - position.x;
+    ret.direction.y = yw - position.y;
+    ret.direction.z = zw - position.z;
+
+    return ret;
+    */
 }
 
 static void update_basis() {
@@ -64,6 +82,128 @@ static void move(float x, float y, float z) {
 
 // --------------------------------------------------------------------------------
 
+namespace renderer {
+static size_t img_width, img_height;
+static float aspect_ratio;
+
+inline static void set_resolution(size_t hres, size_t vres) {
+    img_width = hres, img_height = vres;
+    aspect_ratio = static_cast<float>(hres) / vres;
+}
+
+static float tone_mapping;
+
+struct Pixel {
+    byte r, g, b;
+
+    void paint(Color3 color, size_t num_samples) {
+        r = static_cast<byte>(256 * clampf(sqrtf(color.r / num_samples), 0.0f, 0.999f));
+        g = static_cast<byte>(256 * clampf(sqrtf(color.g / num_samples), 0.0f, 0.999f));
+        b = static_cast<byte>(256 * clampf(sqrtf(color.b / num_samples), 0.0f, 0.999f));
+        /*
+        float rf = color.r / num_samples;
+        float gf = color.g / num_samples;
+        float bf = color.b / num_samples;
+
+        r = static_cast<byte>(256 * clampf(sqrtf(rf / rf + tone_mapping), 0.0f, 0.999f));
+        g = static_cast<byte>(256 * clampf(sqrtf(gf / gf + tone_mapping), 0.0f, 0.999f));
+        b = static_cast<byte>(256 * clampf(sqrtf(bf / bf + tone_mapping), 0.0f, 0.999f));
+        */
+    }
+};
+
+static size_t samples_per_pixel = 100;
+static constexpr size_t max_depth = 10;
+
+static Color3 shade(Ray ray, size_t depth) {
+    if (depth == max_depth) {
+        return {};
+    }
+
+    Intersection info = scene::closest_intersection(ray, EPSILON32, INFINITY32);
+
+    if (info.intersected) {
+        if (info.material.emissive) {
+            return info.material.albedo.get_value(info.u, info.v, info.point);
+        }
+
+        Color3 color = scene::phong_shade(ray, info);
+
+        float kd = info.material.kd, ks = info.material.ks, kt = info.material.kt;
+        float ktot = kd + ks + kt;
+        float rand_val = randf(0.0f, ktot);
+
+        Ray new_ray;
+        if (rand_val < kd) {
+            float r1 = randf(0.0f, 1.0f);
+            float sqrt_r1 = sqrtf(r1);
+            float theta = 2.0f * PI32 * randf(0.0f, 1.0f);
+
+            Vector3 w = info.normal;
+            Vector3 v0{0.0f, 1.0f, 0.0f};
+            Vector3 v1{1.0f, 0.0f, 0.0f};
+            Vector3 u = absf(w.x) > 0.1f ? v0 : v1;
+            u = (normalize(cross(u, w)));
+            Vector3 v = cross(w, u);
+
+            Vector3 dir = normalize({
+                u.x * cosf(theta) * sqrt_r1 + v.x * sinf(theta) * sqrt_r1 + w.x * sqrtf(1.0f - r1),
+                u.y * cosf(theta) * sqrt_r1 + v.y * sinf(theta) * sqrt_r1 + w.y * sqrtf(1.0f - r1),
+                u.z * cosf(theta) * sqrt_r1 + v.z * sinf(theta) * sqrt_r1 + w.z * sqrtf(1.0f - r1)
+            });
+
+            new_ray.origin = info.point;
+            new_ray.direction = dir;
+        } else if (rand_val < kd + ks) {
+            new_ray = reflect(ray, info.point, info.normal);
+        } else {
+            bool total_reflection = false;
+            new_ray = refract(ray, info.point, info.normal, info.material.refractive_index,
+                              info.front_face, total_reflection);
+        }
+
+        float k = fmaxf(fmaxf(kd, ks), kt);
+
+        return (color + shade(new_ray, depth + 1)) * k;
+    }
+
+    return scene::background_color;
+}
+
+static void render() {
+    size_t img_res = img_width * img_height;
+
+    Pixel pixels[img_res];
+    size_t num_painted = 0;
+
+    for (size_t y = 0; y < img_height; ++y) {
+        for (size_t x = 0; x < img_width; ++x) {
+            Color3 pixel_color{};
+
+            for (size_t _ = 0; _ < samples_per_pixel; ++_) {
+                float hcoef = (x + randf()) / (img_width - 1);
+                float vcoef = (y + randf()) / (img_height - 1);
+
+                Ray ray = camera::get_ray(hcoef, vcoef);
+
+                pixel_color = pixel_color + shade(ray, 0);
+            }
+
+            pixels[num_painted++].paint(pixel_color, samples_per_pixel);
+
+            fprintf(stderr, "\rProgress: %zu%%", 100 * num_painted / img_res);
+            fflush(stderr);
+        }
+    }
+    fprintf(stderr, "\n");
+
+    stbi_flip_vertically_on_write(1);
+    stbi_write_png("img/image.png", img_width, img_height, 3, pixels, img_width * sizeof(Pixel));
+}
+} // namespace renderer
+
+// --------------------------------------------------------------------------------
+
 namespace parser {
 static constexpr size_t max_power = 20;
 
@@ -80,7 +220,7 @@ static const double powers_of_10_neg[max_power] = {
 static char *get_file_content(const char *filepath) {
     FILE *file = fopen(filepath, "rb");
     if (!file) {
-        panic("could not open file.");
+        panic("could not open file '%s'.", filepath);
     }
     defer { fclose(file); };
 
@@ -249,7 +389,7 @@ static const char *parse_face(const char *at, Array<size_t> &idxs) {
     return skip_whitespace(at);
 }
 
-static void parse_obj(const char *filepath, Material material) {
+static void parse_obj(const char *filepath, Material material, float light_intensity = -1.0f) {
     const char *at = get_file_content(filepath);
 
     Array<Point3> verts{};
@@ -291,246 +431,90 @@ static void parse_obj(const char *filepath, Material material) {
     }
 
     if (material.emissive) {
-        // TODO(paalf): remove the hardcoded 1.0f intensity
-        scene::lights.push(Light::make(verts, idxs, material, 1.0f));
+        scene::lights.push(Light::make(verts, idxs, material, light_intensity));
     } else {
         scene::meshes.push(Mesh::make(verts, idxs, material));
     }
 }
 
-struct Token {
-    enum class Type : byte {
-        EYE,
-        ORTHO,
-        SIZE,
-        BACKGROUND,
-        AMBIENT,
-        LIGHT,
-        NPATHS,
-        TONEMAPPING,
-        SEED,
-        OBJECTQUADRIC,
-        OBJECT,
-        UNKNOWN
-    };
-
-    Type type;
-    const char *lexeme;
-};
-
-static Token get_next_token(const char *&at) {
-    at = skip_whitespace(at);
-
-    if (!(*at)) {
-        return {Token::Type::UNKNOWN, nullptr};
+static void parse_sdl(const char *filepath, Point3 &look_from) {
+    FILE *file = fopen(filepath, "rb");
+    if (!file) {
+        panic("could not open file '%s'.", filepath);
     }
+    defer { fclose(file); };
 
-    const char *start = at;
-    at = skip_whitespace(at);
+    while (true) {
+        char line_header[128];
+        if (fscanf(file, "%s", line_header) == EOF) {
+            break;
+        }
 
-    size_t length = at - start;
+        if (strcmp(line_header, "eye") == 0) {
+            fscanf(file, "%f %f %f\n", &look_from.x, &look_from.y, &look_from.z);
+        } else if (strcmp(line_header, "ortho") == 0) {
+            fscanf(file, "%f %f %f %f\n", &camera::win_x0, &camera::win_y0, &camera::win_x1, &camera::win_y1);
+            camera::win_width = camera::win_x1 - camera::win_x0;
+            camera::win_height = camera::win_y1 - camera::win_y0;
+        } else if (strcmp(line_header, "size") == 0) {
+            size_t width, height;
+            fscanf(file, "%zu %zu\n", &width, &height);
 
-    if (strncmp(start, "eye", length) == 0) {
-        return {Token::Type::EYE, start};
-    } else if (strncmp(start, "ortho", length) == 0) {
-        return {Token::Type::ORTHO, start};
-    } else if (strncmp(start, "size", length) == 0) {
-        return {Token::Type::SIZE, start};
-    } else if (strncmp(start, "background", length) == 0) {
-        return {Token::Type::BACKGROUND, start};
-    } else if (strncmp(start, "ambient", length) == 0) {
-        return {Token::Type::AMBIENT, start};
-    } else if (strncmp(start, "light", length) == 0) {
-        return {Token::Type::LIGHT, start};
-    } else if (strncmp(start, "npaths", length) == 0) {
-        return {Token::Type::NPATHS, start};
-    } else if (strncmp(start, "tonemapping", length) == 0) {
-        return {Token::Type::TONEMAPPING, start};
-    } else if (strncmp(start, "seed", length) == 0) {
-        return {Token::Type::SEED, start};
-    } else if (strncmp(start, "objectquadric", length) == 0) {
-        return {Token::Type::OBJECTQUADRIC, start};
-    } else if (strncmp(start, "object", length) == 0) {
-        return {Token::Type::OBJECT, start};
-    }
+            renderer::set_resolution(width, height);
+        } else if (strcmp(line_header, "background") == 0) {
+            fscanf(file, "%f %f %f\n", &scene::background_color.r, &scene::background_color.g, &scene::background_color.b);
+        } else if (strcmp(line_header, "ambient") == 0) {
+            fscanf(file, "%f\n", &scene::ambient_factor);
+        } else if (strcmp(line_header, "light") == 0) {
+            char path[100];
+            Color3 light_color;
+            float light_intensity;
+            fscanf(file, "%s %f %f %f %f\n", path, &light_color.r, &light_color.g, &light_color.b, &light_intensity);
 
-    return {Token::Type::UNKNOWN, start};
-}
+            char light_obj_path[111];
+            sprintf(light_obj_path, "res/models/%s", path);
+            Material light_material{Texture::make(light_color), true};
+            parse_obj(light_obj_path, light_material, light_intensity);
+        } else if (strcmp(line_header, "npaths") == 0) {
+            fscanf(file, "%zu", &renderer::samples_per_pixel);
+        } else if (strcmp(line_header, "tonemapping") == 0) {
+            fscanf(file, "%f", &renderer::tone_mapping);
+        } else if (strcmp(line_header, "seed") == 0) {
+            int seed;
+            fscanf(file, "%d", &seed);
 
-static const char *parse_vector3(const char *at, Vector3 &vec) {
-    at = parse_float(at, vec.x);
-    at = parse_float(at, vec.y);
-    at = parse_float(at, vec.z);
+            srand(seed);
+        } else if (strcmp(line_header, "object") == 0) {
+            char path[100];
+            Color3 obj_color;
+            float ka, kd, ks, kt, n, ri;
+            fscanf(file, "%s %f %f %f %f %f %f %f %f %f\n",
+                   path, &obj_color.r, &obj_color.g, &obj_color.b,
+                   &ka, &kd, &ks, &kt, &n, &ri);
 
-    return skip_whitespace(at);
-}
+            char obj_path[111];
+            sprintf(obj_path, "res/models/%s", path);
+            Material obj_material{Texture::make(obj_color), false, ka, kd, ks, kt, n, ri};
+            parse_obj(obj_path, obj_material);
+        } else if (strcmp(line_header, "quadric") == 0) {
+            float a, b, c, d, e;
+            float f, g, h, j, k;
+            Color3 quadric_color;
+            float ka, kd, ks, kt, n, ri;
 
-static void parse_sdl(const char *filepath) {
-    const char *at = get_file_content(filepath);
+            fscanf(file, "%f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\n",
+                   &a, &b, &c, &d, &e, &f, &g, &h, &j, &k, &quadric_color.r, &quadric_color.g, &quadric_color.b,
+                   &ka, &kd, &ks, &kt, &n, &ri);
 
-    while (*at) {
-        Token token = get_next_token(at);
-
-        switch (token.type) {
-        case Token::Type::EYE: {
-            parse_vector3(at, camera::position);
-        } break;
-
-        case Token::Type::ORTHO: {
-
-        } break;
-
-        case Token::Type::SIZE: {
-            
-        } break;
-
-        case Token::Type::BACKGROUND: {
-
-        } break;
-
-        case Token::Type::AMBIENT: {
-
-        } break;
-
-        case Token::Type::LIGHT: {
-
-        } break;
-
-        case Token::Type::NPATHS: {
-
-        } break;
-
-        case Token::Type::TONEMAPPING: {
-
-        } break;
-
-        case Token::Type::SEED: {
-
-        } break;
-
-        case Token::Type::OBJECTQUADRIC: {
-
-        } break;
-
-        case Token::Type::OBJECT: {
-
-        } break;
-
-        case Token::Type::UNKNOWN: {
-
-        } break;
+            Material quadric_material{Texture::make(quadric_color), false, ka, kd, ks, kt, n, ri};
+            scene::quadrics.push(Quadric::make(a, b, c, d, e, f, g, h, j, k, quadric_material));
+        } else {
+            char comments[1024];
+            fgets(comments, 1024, file);
         }
     }
 }
 } // namespace parser
-
-// --------------------------------------------------------------------------------
-
-namespace renderer {
-static size_t img_width, img_height;
-static float aspect_ratio;
-
-inline static void set_resolution(size_t hres, size_t vres) {
-    img_width = hres, img_height = vres;
-    aspect_ratio = static_cast<float>(hres) / vres;
-}
-
-struct Pixel {
-    byte r, g, b;
-
-    void paint(Color3 color, size_t num_samples) {
-        r = static_cast<byte>(256 * clampf(sqrtf(color.r / num_samples), 0.0f, 0.999f));
-        g = static_cast<byte>(256 * clampf(sqrtf(color.g / num_samples), 0.0f, 0.999f));
-        b = static_cast<byte>(256 * clampf(sqrtf(color.b / num_samples), 0.0f, 0.999f));
-    }
-};
-
-static constexpr size_t samples_per_pixel = 100, max_depth = 10;
-
-static Color3 shade(Ray ray, size_t depth) {
-    if (depth == max_depth) {
-        return {};
-    }
-
-    Intersection info = scene::closest_intersection(ray, EPSILON32, INFINITY32);
-
-    if (info.intersected) {
-        if (info.material.emissive) {
-            return info.material.albedo.get_value(info.u, info.v, info.point);
-        }
-
-        Color3 color = scene::phong_shade(ray, info);
-
-        float kd = info.material.kd, ks = info.material.ks, kt = info.material.kt;
-        float ktot = kd + ks + kt;
-        float rand_val = randf(0.0f, ktot);
-
-        Ray new_ray;
-        if (rand_val < kd) {
-            float r1 = randf(0.0f, 1.0f), r2 = randf(0.0f, 1.0f);
-            float phi = acosf(sqrtf(r1)), theta = 2 * PI32 * r2;
-
-            new_ray.origin = info.point;
-            new_ray.direction = {
-                sinf(phi) * cosf(theta),
-                sinf(phi) * sinf(theta),
-                cosf(phi)
-            };
-        } else if (rand_val < kd + ks) {
-            new_ray = reflect(ray, info.point, info.normal);
-
-            /*
-            Vector3 light_dir = scene::lights[0].centroid - info.point;
-
-            new_ray.origin = info.point;
-            new_ray.direction = reflect(-light_dir, info.normal);
-            */
-        } else {
-            bool total_reflection = false;
-
-            new_ray = refract(ray, info.point, info.normal, info.material.refractive_index,
-                              info.front_face, total_reflection);
-        }
-
-        float k = fmaxf(fmaxf(kd, ks), kt);
-
-        return (color + shade(new_ray, depth + 1)) * k;
-    }
-
-    return scene::background_color;
-}
-
-static void render() {
-    size_t img_res = img_width * img_height;
-
-    Pixel pixels[img_res];
-    size_t num_painted = 0;
-
-    for (size_t y = 0; y < img_height; ++y) {
-        for (size_t x = 0; x < img_width; ++x) {
-            Color3 pixel_color{};
-
-            for (size_t _ = 0; _ < samples_per_pixel; ++_) {
-                float hcoef = (x + randf()) / (img_width - 1);
-                float vcoef = (y + randf()) / (img_height - 1);
-
-                Ray ray = camera::get_ray(hcoef, vcoef);
-
-                pixel_color = pixel_color + shade(ray, 0);
-            }
-
-            pixels[num_painted++].paint(pixel_color, samples_per_pixel);
-
-            fprintf(stderr, "\rProgress: %zu%%", 100 * num_painted / img_res);
-            fflush(stderr);
-        }
-    }
-    fprintf(stderr, "\n");
-
-    stbi_flip_vertically_on_write(1);
-    stbi_write_png("img/image.png", img_width, img_height, 3, pixels, img_width * sizeof(Pixel));
-}
-} // namespace renderer
 
 // --------------------------------------------------------------------------------
 

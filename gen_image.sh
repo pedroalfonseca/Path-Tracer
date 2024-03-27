@@ -13,7 +13,8 @@ wrong_usage() {
     printf "\033[93mScene options:\033[0m\n"
     printf "\033[95m[SAMPLE]\033[0m    -s\n"
     printf "\033[95m[CORNELL]\033[0m   -c\n"
-    printf "\033[95m[VAPORWAVE]\033[0m -v\n"
+    printf "\033[95m[VAPORWAVE]\033[0m -v\n\n"
+    printf "You can also set the sdl file path as the scene option\n"
     exit 1
 }
 
@@ -27,9 +28,6 @@ if [ "$COMPILATION_OPTION" != "-s" ] && [ "$COMPILATION_OPTION" != "-f" ]; then
 fi
 
 SCENE_OPTION=$2
-if [ "$SCENE_OPTION" != "-s" ] && [ "$SCENE_OPTION" != "-c" ] && [ "$SCENE_OPTION" != "-v" ] && [ "$SCENE_OPTION" != "-f" ]; then
-    wrong_usage
-fi
 
 printf "Compiling '%s' with C++11...\n" "$TARGET"
 

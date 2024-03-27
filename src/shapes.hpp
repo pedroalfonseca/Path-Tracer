@@ -8,6 +8,10 @@
 struct AABB {
     Point3 min, max;
 
+    static AABB make(Point3 min, Point3 max) {
+        return {min, max};
+    }
+
     static AABB make(AABB box0, AABB box1) {
         Point3 small{
             fmin(box0.min.x, box1.min.x),
@@ -293,18 +297,27 @@ struct Quadric {
 
     Material material;
 
+    //AABB box;
+
     static Quadric make(float a, float b, float c, float d, float e,
                         float f, float g, float h, float j, float k,
-                        Material material) {
+                        Material material/*, Point3 box_min, Point3 box_max*/) {
         return {
             a, b, c, d, e,
             f, g, h, j, k,
-            material
+            material,
+            //AABB::make(box_min, box_max)
         };
     }
 
     Intersection intersect(Ray ray, float t_min, float t_max) const {
         Intersection ret{};
+
+        /*
+        if (!box.intersect(ray, t_min, t_max)) {
+            return ret;
+        }
+        */
 
         Point3 orig = ray.origin;
         Vector3 dir = ray.direction;
@@ -589,8 +602,6 @@ static Color3 phong_shade(Ray ray, Intersection info) {
     for (const auto &light : lights) {
         Vector3 light_dir = normalize(light.centroid - info.point);
 
-#define BARYCENTRIC
-#ifdef BARYCENTRIC
         size_t face_idx = rand() % 2;
         Triangle face = light.mesh.triangles[face_idx];
 
@@ -615,10 +626,6 @@ static Color3 phong_shade(Ray ray, Intersection info) {
         };
 
         Vector3 rand_dir = normalize(light_rand - info.point);
-#else
-        //Vector3 rand_dir = randv3_in_hemisphere(light_dir);
-        Vector3 rand_dir = light_dir;
-#endif
 
         Color3 light_color = light.intensity * light.get_material().albedo.get_value(info.u, info.v, info.point);
         Ray light_ray{info.point + info.normal * BIAS, rand_dir};

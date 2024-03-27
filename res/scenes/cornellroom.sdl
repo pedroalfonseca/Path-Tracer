@@ -14,7 +14,7 @@ ambient 0.5
 # Luz branca retangulo no centro do teto
 light luzcornell.obj 1.0 1.0 1.0 1.0
 
-npaths 10
+npaths 100
 tonemapping 1.0
 seed 9
 
@@ -47,5 +47,7 @@ object cube1.obj 1.0 1.0 1.0 0.3 0.7 0 0 5
 
 # cube 2 WHITE
 object cube2.obj 1.0 1.0 1.0 0.3 0.7 0 0 5
+
+quadric 1.0 1.0 1.0 0.0 0.0 0.0 -1.0 0.0 22.0 484.0 1.0 1.0 1.0 0.0 0.0 0 1 5 1.33
 
 output cornell.pnm
